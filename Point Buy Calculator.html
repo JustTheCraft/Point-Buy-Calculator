@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>D&D 5e Point Buy Calculator</title>
+  <style>
+    :root {
+      --bg-color: #121212;
+      --text-color: #f0f0f0;
+      --accent-color: #1e88e5;
+      --border-color: #444;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    h1 {
+      text-align: center;
+      margin-top: 20px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+      font-size: 14px;
+    }
+
+    th, td {
+      padding: 8px;
+      text-align: center;
+      border: 1px solid var(--border-color);
+    }
+
+    select, button {
+      padding: 6px;
+      border: 1px solid var(--border-color);
+      background-color: #1f1f1f;
+      color: var(--text-color);
+      border-radius: 4px;
+    }
+
+    button:hover {
+      background-color: var(--accent-color);
+      color: #fff;
+      cursor: pointer;
+    }
+
+    .controls {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .controls label,
+    .total-points {
+      font-weight: bold;
+    }
+
+    .total-points {
+      font-size: 1.1em;
+      text-align: right;
+    }
+
+    .modifier {
+      font-style: italic;
+      color: #bbb;
+    }
+
+    .reset-button {
+      align-self: flex-start;
+    }
+
+    @media (max-width: 600px) {
+      table {
+        font-size: 12px;
+      }
+
+      th, td {
+        padding: 6px;
+      }
+
+      .controls {
+        gap: 8px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>5e Point Buy Calculator</h1>
+
+  <div class="controls">
+    <label>Choose racial bonus method:
+      <select id="bonus-mode" onchange="resetRacialBonus()">
+        <option value="2-1">+2 and +1</option>
+        <option value="1-1-1">+1 to three stats</option>
+      </select>
+    </label>
+    <button class="reset-button" onclick="resetAll()">🔁 Reset All</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Ability</th>
+        <th>Score</th>
+        <th>+ / -</th>
+        <th>Racial Bonus</th>
+        <th>Total</th>
+        <th>Modifier</th>
+        <th>Cost</th>
+      </tr>
+    </thead>
+    <tbody id="ability-table"></tbody>
+  </table>
+
+  <div class="total-points">Points used: <span id="points-used">0</span> / 27</div>
+
+  <script>
+    const abilities = ["STR", "DEX", "CON", "INT", "WIS", "CHA"];
+    let scores = Object.fromEntries(abilities.map(stat => [stat, 8]));
+    let racialBonus = Object.fromEntries(abilities.map(stat => [stat, 0]));
+
+    const costTable = {
+      8: 0, 9: 1, 10: 2, 11: 3, 12: 4, 13: 5, 14: 7, 15: 9
+    };
+
+    function modifier(score) {
+      return Math.floor((score - 10) / 2);
+    }
+
+    function createTable() {
+      const tbody = document.getElementById("ability-table");
+      tbody.innerHTML = "";
+      abilities.forEach(stat => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${stat}</td>
+          <td id="${stat}-score">${scores[stat]}</td>
+          <td>
+            <button onclick="changeScore('${stat}', -1)">-</button>
+            <button onclick="changeScore('${stat}', 1)">+</button>
+          </td>
+          <td>
+            <select class="racial-select" data-stat="${stat}" onchange="updateRacialBonus()">
+              <option value="0">+0</option>
+              <option value="1">+1</option>
+              <option value="2">+2</option>
+            </select>
+          </td>
+          <td id="${stat}-total">${scores[stat]}</td>
+          <td class="modifier" id="${stat}-mod">+0</td>
+          <td id="${stat}-cost">0</td>
+        `;
+        tbody.appendChild(tr);
+      });
+      updateUI();
+    }
+
+    function changeScore(stat, delta) {
+      const newScore = scores[stat] + delta;
+      if (newScore < 8 || newScore > 15) return;
+
+      const tempScores = { ...scores, [stat]: newScore };
+      const totalCost = Object.entries(tempScores).reduce((sum, [s, val]) => sum + costTable[val], 0);
+      if (totalCost <= 27) {
+        scores[stat] = newScore;
+        updateUI();
+      }
+    }
+
+    function updateRacialBonus() {
+      const mode = document.getElementById("bonus-mode").value;
+      const selects = document.querySelectorAll(".racial-select");
+      let bonusCounts = { "1": 0, "2": 0 };
+      let usedStats = { "1": [], "2": [] };
+
+      // Read selections and update bonus
+      selects.forEach(sel => {
+        const val = parseInt(sel.value);
+        const stat = sel.dataset.stat;
+        racialBonus[stat] = val;
+        if (val > 0) {
+          bonusCounts[val]++;
+          usedStats[val].push(stat);
+        }
+      });
+
+      // Disable options based on rules
+      selects.forEach(sel => {
+        const stat = sel.dataset.stat;
+        const current = parseInt(sel.value);
+        for (let option of sel.options) {
+          const val = parseInt(option.value);
+          option.disabled = false;
+
+          if (mode === "2-1") {
+            if (val === 2 && bonusCounts["2"] >= 1 && current !== 2) option.disabled = true;
+            if (val === 1 && bonusCounts["1"] >= 1 && current !== 1) option.disabled = true;
+          } else if (mode === "1-1-1") {
+            if (val === 2) option.disabled = true;
+            if (val === 1 && bonusCounts["1"] >= 3 && current !== 1) option.disabled = true;
+          }
+        }
+      });
+
+      updateUI();
+    }
+
+    function resetRacialBonus() {
+      const selects = document.querySelectorAll(".racial-select");
+      selects.forEach(sel => sel.value = "0");
+      racialBonus = Object.fromEntries(abilities.map(stat => [stat, 0]));
+      updateRacialBonus();
+    }
+
+    function resetAll() {
+      scores = Object.fromEntries(abilities.map(stat => [stat, 8]));
+      resetRacialBonus();
+      updateUI();
+    }
+
+    function updateUI() {
+      let pointsUsed = 0;
+      abilities.forEach(stat => {
+        const base = scores[stat];
+        const bonus = racialBonus[stat];
+        const total = base + bonus;
+        const mod = modifier(total);
+        const cost = costTable[base];
+
+        document.getElementById(`${stat}-score`).textContent = base;
+        document.getElementById(`${stat}-total`).textContent = total;
+        document.getElementById(`${stat}-mod`).textContent = (mod >= 0 ? "+" : "") + mod;
+        document.getElementById(`${stat}-cost`).textContent = cost;
+        pointsUsed += cost;
+      });
+
+      document.getElementById("points-used").textContent = pointsUsed;
+    }
+
+    createTable();
+  </script>
+</body>
+</html>
